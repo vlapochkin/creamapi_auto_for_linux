@@ -7,8 +7,10 @@ use zip::ZipArchive;
 use bytes::Bytes;
 
 pub async fn check_and_download_core() -> Result<String> {
+    // We use SmokeAPI as the core engine for DLC unlocking.
+    // Credits to: https://github.com/acidicoala/SmokeAPI
     let client = Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .user_agent("CreamAPI-Auto-Linux/0.1.0 (SmokeAPI-Integration)")
         .build()?;
 
     let url = "https://api.github.com/repos/acidicoala/SmokeAPI/releases/latest";
