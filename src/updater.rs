@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 pub async fn check_and_download_core() -> Result<String> {
     let client = Client::builder()
-        .user_agent("CreamAPI-Auto-Linux")
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()?;
 
     let url = "https://api.github.com/repos/acidicoala/SmokeAPI/releases/latest";
