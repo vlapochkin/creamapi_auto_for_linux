@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use crate::steam_scanner::SteamGame;
 
 pub struct Injector {}
@@ -37,7 +37,7 @@ impl Injector {
             // Step 1: Backup (Rename original to _o)
             if !backup_path.exists() {
                 if target.path.exists() {
-                    if let Err(e) = fs::rename(&target.path, &backup_path) {
+                    if let Err(_) = fs::rename(&target.path, &backup_path) {
                         // Fallback to copy and remove if rename fails
                         if let Err(e) = fs::copy(&target.path, &backup_path).and_then(|_| fs::remove_file(&target.path)) {
                             if e.kind() == io::ErrorKind::PermissionDenied {

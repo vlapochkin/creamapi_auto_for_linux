@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use std::fs;
 use std::io::Cursor;
-use std::path::PathBuf;
 use zip::ZipArchive;
 use bytes::Bytes;
 

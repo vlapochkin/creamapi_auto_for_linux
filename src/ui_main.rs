@@ -1,237 +1,296 @@
 use libadwaita::prelude::*;
-use libadwaita::{ApplicationWindow, HeaderBar, StatusPage, Toast, ToastOverlay, ExpanderRow, ActionRow};
-use gtk4::{Box, ListBox, Orientation, ScrolledWindow, Label, Button, Align, SelectionMode, PolicyType};
+use libadwaita::{ApplicationWindow, HeaderBar, Toast, ToastOverlay, ExpanderRow, ActionRow, MessageDialog, ResponseAppearance, PreferencesGroup, StatusPage};
+use gtk4::{Box, ListBox, Orientation, ScrolledWindow, Label, Button, Align, SelectionMode, MenuButton, gio, Spinner, ProgressBar, Image, gdk, LinkButton, SearchEntry};
+use gtk4::pango::EllipsizeMode;
 use gtk4::glib;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::process::Command;
+use std::fs;
 use crate::steam_scanner::{SteamGame, GameType, AppCategory, discover_steam_libraries, scan_games};
 use crate::injector::Injector;
 
+#[derive(Clone, Copy, PartialEq)]
+enum Language { EN, RU }
+
+struct Translations {
+    title: &'static str, scanning: &'static str, downloading_core: &'static str,
+    games_not_found: &'static str, apply_patch: &'static str, restore: &'static str,
+    status_patched: &'static str, status_safe: &'static str, status_warn: &'static str,
+    status_forbidden: &'static str, open_folder: &'static str, copy_params: &'static str,
+    dlc_list_title: &'static str, view_store: &'static str, view_protondb: &'static str,
+    group_games: &'static str, group_system: &'static str, confirm_title: &'static str,
+    confirm_body: &'static str, confirm_yes: &'static str, confirm_no: &'static str,
+    search_placeholder: &'static str,
+}
+
+const EN_TRANS: Translations = Translations {
+    title: "VaporDose", scanning: "Scanning Games...", downloading_core: "Updating SmokeAPI...",
+    games_not_found: "No games found.", apply_patch: "Patch DLC", restore: "Restore", status_patched: "Patched",
+    status_safe: "Safe", status_warn: "Risk", status_forbidden: "Forbidden", open_folder: "Folder",
+    copy_params: "Copy", dlc_list_title: "DLC IDs", view_store: "Store", view_protondb: "ProtonDB",
+    group_games: "Installed Games", group_system: "System Tools", confirm_title: "Warning",
+    confirm_body: "Online features detected. Proceed?", confirm_yes: "Proceed",
+    confirm_no: "Cancel", search_placeholder: "Filter games...",
+};
+
+const RU_TRANS: Translations = Translations {
+    title: "VaporDose", scanning: "Загрузка игр...", downloading_core: "Обновление ядра...",
+    games_not_found: "Не найдено.", apply_patch: "Патчить", restore: "Вернуть", status_patched: "Готово",
+    status_safe: "Безопасно", status_warn: "Риск", status_forbidden: "Запрещено", open_folder: "Папка",
+    copy_params: "Копировать", dlc_list_title: "ID DLC", view_store: "Магазин", view_protondb: "ProtonDB",
+    group_games: "Установленные игры", group_system: "Системные компоненты", confirm_title: "Внимание",
+    confirm_body: "В игре есть онлайн-функции. Продолжить?", confirm_yes: "Да",
+    confirm_no: "Отмена", search_placeholder: "Поиск игр...",
+};
+
 pub fn build_ui(app: &libadwaita::Application) {
+    let current_lang = Arc::new(Mutex::new(Language::RU));
+    let injector = Arc::new(Injector::new());
+
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("Steam Compatibility Manager")
-        .default_width(700)
-        .default_height(600)
+        .title("VaporDose")
+        .default_width(950)
+        .default_height(850)
         .build();
 
     let toast_overlay = ToastOverlay::new();
     let main_box = Box::new(Orientation::Vertical, 0);
-    
     let header_bar = HeaderBar::new();
     main_box.append(&header_bar);
 
-    let update_button = Button::builder()
-        .icon_name("system-software-update-symbolic")
-        .label("Обновить SmokeAPI")
-        .tooltip_text("Проверить и скачать обновления ядра SmokeAPI")
-        .build();
-    header_bar.pack_end(&update_button);
+    let search_box = Box::builder().margin_top(12).margin_start(24).margin_end(24).build();
+    let search_entry = SearchEntry::builder().hexpand(true).build();
+    search_box.append(&search_entry);
+    main_box.append(&search_box);
 
-    let overlay_clone = toast_overlay.clone();
-    let update_btn_clone = update_button.clone();
-    update_button.connect_clicked(move |_| {
-        let overlay_task = overlay_clone.clone();
-        let btn_task = update_btn_clone.clone();
-        
-        btn_task.set_sensitive(false);
-        overlay_task.add_toast(Toast::new("Проверка обновлений с GitHub..."));
+    let scrolled_window = ScrolledWindow::builder().vexpand(true).build();
+    let content_box = Box::builder().orientation(Orientation::Vertical).margin_top(12).margin_bottom(24).margin_start(24).margin_end(24).spacing(24).build();
+    let games_group = PreferencesGroup::builder().build();
+    let games_list = ListBox::builder().selection_mode(SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
+    games_group.add(&games_list);
+    let system_group = PreferencesGroup::builder().build();
+    let system_list = ListBox::builder().selection_mode(SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
+    system_group.add(&system_list);
+    content_box.append(&games_group); content_box.append(&system_group);
+
+    let loading_box = Box::builder().orientation(Orientation::Vertical).spacing(20).valign(Align::Center).halign(Align::Center).build();
+    let spinner = Spinner::builder().spinning(true).width_request(64).height_request(64).build();
+    let loading_label = Label::builder().css_classes(vec!["title-1".to_string()]).build();
+    let progress_bar = ProgressBar::builder().width_request(400).build();
+    loading_box.append(&spinner); loading_box.append(&loading_label); loading_box.append(&progress_bar);
+
+    scrolled_window.set_child(Some(&loading_box)); main_box.append(&scrolled_window);
+    toast_overlay.set_child(Some(&main_box)); window.set_content(Some(&toast_overlay));
+
+    let run_scan = glib::clone!(@weak games_group, @weak system_group, @weak games_list, @weak system_list, @weak scrolled_window, @weak content_box, @weak loading_box, @weak loading_label, @weak progress_bar, @weak window, @weak search_entry, @weak toast_overlay, @strong injector, @strong current_lang => move || {
+        let lang = *current_lang.lock().unwrap();
+        let trans = if lang == Language::RU { &RU_TRANS } else { &EN_TRANS };
+        window.set_title(Some(trans.title));
+        loading_label.set_label(trans.scanning);
+        search_entry.set_placeholder_text(Some(trans.search_placeholder));
+        games_group.set_title(trans.group_games);
+        system_group.set_title(trans.group_system);
+        progress_bar.set_fraction(0.1);
+        scrolled_window.set_child(Some(&loading_box));
+
+        let current_lang_inner = current_lang.clone();
+        let toast_overlay_inner = toast_overlay.clone();
+        let injector_inner = injector.clone();
 
         glib::spawn_future_local(async move {
-            match crate::updater::check_and_download_core().await {
-                Ok(msg) => {
-                    overlay_task.add_toast(Toast::new(&msg));
-                }
-                Err(e) => {
-                    overlay_task.add_toast(Toast::new(&format!("Ошибка обновления: {}", e)));
+            let libraries = tokio::task::spawn_blocking(discover_steam_libraries).await.unwrap_or_default();
+            let games = scan_games(&libraries).await;
+            progress_bar.set_fraction(0.5);
+            loading_label.set_label(if *current_lang_inner.lock().unwrap() == Language::RU { RU_TRANS.downloading_core } else { EN_TRANS.downloading_core });
+            glib::spawn_future_local(async move { let _ = crate::updater::check_and_download_core().await; });
+
+            while let Some(child) = games_list.first_child() { games_list.remove(&child); }
+            while let Some(child) = system_list.first_child() { system_list.remove(&child); }
+
+            if games.is_empty() {
+                let status_page = StatusPage::builder().icon_name("system-search-symbolic").build();
+                scrolled_window.set_child(Some(&status_page));
+            } else {
+                scrolled_window.set_child(Some(&content_box));
+                for game in games {
+                    let row = create_game_row(game.clone(), injector_inner.clone(), toast_overlay_inner.clone(), current_lang_inner.clone(), window.clone());
+                    if game.category == AppCategory::SystemTool { system_list.append(&row); }
+                    else { games_list.append(&row); }
                 }
             }
-            btn_task.set_sensitive(true);
+            progress_bar.set_fraction(1.0);
         });
     });
 
-    let overlay_auto = toast_overlay.clone();
-    let btn_auto = update_button.clone();
-    glib::spawn_future_local(async move {
-        btn_auto.set_sensitive(false);
-        overlay_auto.add_toast(Toast::new("Проверка обновлений SmokeAPI..."));
-        match crate::updater::check_and_download_core().await {
-            Ok(msg) => {
-                if !msg.contains("не требуется") {
-                    overlay_auto.add_toast(Toast::new(&msg));
+    let run_scan_arc = Arc::new(run_scan);
+    search_entry.connect_search_changed(glib::clone!(@weak games_list, @weak system_list, @weak games_group, @weak system_group => move |entry| {
+        let text = entry.text().to_lowercase();
+        let filter = |list: &ListBox, group: &PreferencesGroup| {
+            let mut any_visible = false;
+            let mut child = list.first_child();
+            while let Some(widget) = child {
+                if let Some(row) = widget.downcast_ref::<ExpanderRow>() {
+                    let matches = text.is_empty() || row.title().to_lowercase().contains(&text);
+                    row.set_visible(matches); if matches { any_visible = true; }
                 }
+                child = widget.next_sibling();
             }
-            Err(e) => {
-                overlay_auto.add_toast(Toast::new(&format!("Ошибка авто-обновления: {}", e)));
-            }
-        }
-        btn_auto.set_sensitive(true);
+            group.set_visible(any_visible || text.is_empty());
+        };
+        filter(&games_list, &games_group); filter(&system_list, &system_group);
+    }));
+
+    let refresh_run = run_scan_arc.clone();
+    let setup_lang = glib::clone!(@weak app, @strong current_lang => move |lang: Language| {
+        *current_lang.lock().unwrap() = lang;
+        refresh_run();
     });
 
-    let scrolled_window = ScrolledWindow::builder()
-        .hscrollbar_policy(PolicyType::Never)
-        .vexpand(true)
-        .build();
+    let s_ru = setup_lang.clone(); app.add_action(&{let a = gio::SimpleAction::new("set_lang_ru", None); a.connect_activate(move |_, _| s_ru(Language::RU)); a});
+    let s_en = setup_lang.clone(); app.add_action(&{let a = gio::SimpleAction::new("set_lang_en", None); a.connect_activate(move |_, _| s_en(Language::EN)); a});
 
-    let status_page = StatusPage::builder()
-        .title("Scanning Games...")
-        .description("Идёт поиск игр и классификация (Steam Web API)...")
-        .icon_name("system-search-symbolic")
-        .build();
+    let lang_menu_btn = MenuButton::builder().icon_name("view-more-symbolic").menu_model(&{
+        let m = gio::Menu::new();
+        m.append(Some("Русский"), Some("app.set_lang_ru"));
+        m.append(Some("English"), Some("app.set_lang_en"));
+        m
+    }).build();
+    header_bar.pack_start(&lang_menu_btn);
 
-    let list_box = ListBox::builder()
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .selection_mode(SelectionMode::None)
-        .css_classes(vec!["boxed-list".to_string()])
-        .build();
+    let refresh_button = Button::builder().icon_name("view-refresh-symbolic").build();
+    let scan_trigger = run_scan_arc.clone();
+    refresh_button.connect_clicked(move |_| scan_trigger());
+    header_bar.pack_end(&refresh_button);
 
-    scrolled_window.set_child(Some(&status_page));
-    main_box.append(&scrolled_window);
-    toast_overlay.set_child(Some(&main_box));
-    window.set_content(Some(&toast_overlay));
-
-    let injector = Arc::new(Injector::new());
-    
-    glib::spawn_future_local(async move {
-        let libraries = tokio::task::spawn_blocking(discover_steam_libraries).await.unwrap_or_default();
-        let games = scan_games(&libraries).await; // Now this is async
-
-        if games.is_empty() {
-            status_page.set_title("Игры не найдены");
-            status_page.set_description(Some("Убедитесь, что Steam установлен и есть скачанные игры."));
-            status_page.set_icon_name(Some("view-filter-symbolic"));
-        } else {
-            scrolled_window.set_child(Some(&list_box));
-            for game in games {
-                let row = create_game_row(game, injector.clone(), toast_overlay.clone());
-                list_box.append(&row);
-            }
-        }
-    });
-
+    run_scan_arc();
     window.present();
 }
 
-fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: ToastOverlay) -> ExpanderRow {
-    let row = ExpanderRow::builder()
-        .title(game.name.clone())
-        .subtitle(game.install_dir.to_string_lossy())
-        .build();
+fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: ToastOverlay, current_lang: Arc<Mutex<Language>>, window: ApplicationWindow) -> ExpanderRow {
+    let lang_val = *current_lang.lock().unwrap();
+    let trans = if lang_val == Language::RU { &RU_TRANS } else { &EN_TRANS };
+    let row = ExpanderRow::builder().title(game.name.clone()).subtitle(game.install_dir.to_string_lossy()).build();
 
-    let icon_text = match game.game_type {
-        GameType::Native => "🐧",
-        GameType::Proton => "⚛️",
-        GameType::Mixed => "🐧⚛️",
-        GameType::Unknown => "❓",
-    };
-    
-    let icon_label = Label::builder()
-        .label(icon_text)
-        .css_classes(vec!["title-2".to_string()])
-        .build();
-    row.add_prefix(&icon_label);
-
-    let (cat_text, can_patch) = match game.category {
-        AppCategory::SystemTool => ("⚙️ Системная утилита", false),
-        AppCategory::FreeToPlay => ("🆓 Бесплатная игра (Осторожно)", true),
-        AppCategory::NoDLC => ("🚫 Нет DLC", false),
-        AppCategory::DrmFree => ("🟢 DRM-Free", false),
-        AppCategory::PaidWithDLC => ("🎮 Доступен патч", true),
-        AppCategory::Unknown => ("❓ Неизвестно", true),
-    };
-
-    let cat_label = Label::builder()
-        .label(cat_text)
-        .margin_end(12)
-        .build();
-    row.add_prefix(&cat_label);
-
-    let buttons_box = Box::new(Orientation::Horizontal, 8);
-    buttons_box.set_valign(Align::Center);
-
-    let apply_button = Button::builder()
-        .label("Apply Patch")
-        .sensitive(can_patch)
-        .css_classes(vec!["suggested-action".to_string()])
-        .build();
-
-    let restore_button = Button::builder()
-        .label("Restore")
-        .css_classes(vec!["destructive-action".to_string()])
-        .build();
-
-    buttons_box.append(&apply_button);
-    buttons_box.append(&restore_button);
-
-    let game_clone = game.clone();
-    let overlay_clone = toast_overlay.clone();
-    let injector_clone = injector.clone();
-    
-    apply_button.connect_clicked(move |_| {
-        let game_task = game_clone.clone();
-        let injector_task = injector_clone.clone();
-        let overlay_task = overlay_clone.clone();
-
-        glib::spawn_future_local(async move {
-            let game_task_clone = game_task.clone();
-            let injector_task_clone = injector_task.clone();
-            let result = tokio::task::spawn_blocking(move || injector_task_clone.backup_and_deploy(&game_task_clone)).await.unwrap();
-            match result {
-                Ok(_) => {
-                    if let Some(instr) = injector_task.get_proton_instructions(&game_task) {
-                        if let Some(display) = gtk4::gdk::Display::default() {
-                            display.clipboard().set_text(&instr);
-                        }
-                        overlay_task.add_toast(Toast::new("Патч применён! Параметры запуска для Proton скопированы в буфер обмена."));
-                    } else {
-                        overlay_task.add_toast(Toast::new("Патч успешно применён!"));
-                    }
-                }
-                Err(e) => {
-                    overlay_task.add_toast(Toast::new(&format!("Ошибка: {}", e)));
-                }
+    if let Some(child) = row.first_child() {
+        if let Some(box_widget) = child.downcast_ref::<Box>() {
+            let mut next = box_widget.first_child();
+            while let Some(w) = next {
+                if let Some(lbl) = w.downcast_ref::<Label>() { lbl.set_ellipsize(EllipsizeMode::End); lbl.set_max_width_chars(45); }
+                next = w.next_sibling();
             }
-        });
-    });
-
-    let game_clone_res = game.clone();
-    let overlay_clone_res = toast_overlay.clone();
-    let injector_clone_res = injector.clone();
-    
-    restore_button.connect_clicked(move |_| {
-        let game_task = game_clone_res.clone();
-        let injector_task = injector_clone_res.clone();
-        let overlay_task = overlay_clone_res.clone();
-
-        glib::spawn_future_local(async move {
-            let result = tokio::task::spawn_blocking(move || injector_task.restore_original(&game_task)).await.unwrap();
-            match result {
-                Ok(_) => {
-                    overlay_task.add_toast(Toast::new("Оригинальные файлы успешно восстановлены!"));
-                }
-                Err(e) => {
-                    overlay_task.add_toast(Toast::new(&format!("Ошибка восстановления: {}", e)));
-                }
-            }
-        });
-    });
-
-    row.add_suffix(&buttons_box);
-
-    if !game.dlc_list.is_empty() {
-        let dlc_info_row = ActionRow::builder()
-            .title(format!("Найдено DLC: {}", game.dlc_list.len()))
-            .subtitle(format!("IDs: {:?}", game.dlc_list))
-            .build();
-        row.add_row(&dlc_info_row);
-    } else if game.category != AppCategory::SystemTool {
-        let dlc_info_row = ActionRow::builder()
-            .title("DLC не найдено или игра не поддерживает их")
-            .build();
-        row.add_row(&dlc_info_row);
+        }
     }
 
+    let prefix_box = Box::new(Orientation::Horizontal, 12);
+    let icon_img = Image::builder().pixel_size(48).build();
+    if let Some(path) = &game.icon_path { icon_img.set_from_file(Some(path)); }
+    else { icon_img.set_icon_name(Some("input-gaming-symbolic")); }
+    prefix_box.append(&icon_img);
+
+    let folder_btn = Button::builder().icon_name("folder-open-symbolic").css_classes(vec!["flat".to_string()]).tooltip_text(trans.open_folder).build();
+    let dir_clone = game.install_dir.clone();
+    folder_btn.connect_clicked(move |_| { Command::new("xdg-open").arg(&dir_clone).spawn().ok(); });
+    prefix_box.append(&folder_btn);
+    row.add_prefix(&prefix_box);
+
+    let suffix_box = Box::new(Orientation::Horizontal, 8);
+    suffix_box.set_valign(Align::Center);
+    let (status_color, status_text, can_patch) = match game.category {
+        AppCategory::SystemTool => ("error", trans.group_system, false),
+        _ => ("success", trans.status_safe, true),
+    };
+    let status_dot = Label::builder().label("●").css_classes(vec![status_color.to_string(), "title-1".to_string()]).tooltip_text(status_text).build();
+    suffix_box.append(&status_dot);
+    let apply_btn = Button::builder().css_classes(vec!["suggested-action".to_string()]).build();
+    let restore_btn = Button::builder().label(trans.restore).css_classes(vec!["destructive-action".to_string()]).build();
+    let copy_btn = Button::builder().icon_name("edit-copy-symbolic").tooltip_text(trans.copy_params).build();
+    suffix_box.append(&apply_btn); suffix_box.append(&restore_btn); suffix_box.append(&copy_btn);
+    row.add_suffix(&suffix_box);
+
+    let details_group = PreferencesGroup::builder().margin_top(12).margin_bottom(12).build();
+    let dlc_text = if game.dlc_list.is_empty() { "None".to_string() } else { game.dlc_list.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ") };
+    let dlc_row = ActionRow::builder().title(trans.dlc_list_title).subtitle(dlc_text).build();
+    details_group.add(&dlc_row);
+    let links_box = Box::new(Orientation::Horizontal, 12);
+    links_box.set_margin_start(12); links_box.set_margin_bottom(12);
+    let store_btn = LinkButton::with_label(&format!("https://store.steampowered.com/app/{}", game.appid), trans.view_store);
+    let proton_btn = LinkButton::with_label(&format!("https://www.protondb.com/app/{}", game.appid), trans.view_protondb);
+    links_box.append(&store_btn); links_box.append(&proton_btn);
+    let expanded_box = Box::new(Orientation::Vertical, 0);
+    expanded_box.append(&details_group); expanded_box.append(&links_box);
+    row.add_row(&expanded_box);
+
+    let game_type_val = game.game_type.clone();
+    let update_row_state = glib::clone!(@weak apply_btn, @weak restore_btn, @weak copy_btn, @strong current_lang => move |is_patched: bool| {
+        let lang = *current_lang.lock().unwrap();
+        let trans = if lang == Language::RU { &RU_TRANS } else { &EN_TRANS };
+        if is_patched {
+            apply_btn.set_label(trans.status_patched); apply_btn.set_sensitive(false);
+            restore_btn.set_sensitive(true); copy_btn.set_visible(game_type_val == GameType::Proton);
+        } else {
+            apply_btn.set_label(trans.apply_patch); apply_btn.set_sensitive(can_patch);
+            restore_btn.set_sensitive(false); copy_btn.set_visible(false);
+        }
+    });
+    update_row_state(game.is_patched);
+
+    let injector_c = injector.clone(); let game_c = game.clone(); let overlay_c = toast_overlay.clone(); let lang_c = current_lang.clone();
+    copy_btn.connect_clicked(move |_| {
+        if let Some(instr) = injector_c.get_proton_instructions(&game_c) {
+            if let Some(display) = gdk::Display::default() { display.clipboard().set_text(&instr); overlay_c.add_toast(Toast::new(if *lang_c.lock().unwrap() == Language::RU { "Скопировано!" } else { "Copied!" })); }
+        }
+    });
+
+    let injector_p = injector.clone(); let game_p = game.clone(); let overlay_p = toast_overlay.clone(); 
+    let apply_btn_p = apply_btn.clone(); let restore_btn_p = restore_btn.clone(); let copy_btn_p = copy_btn.clone();
+    let window_p = window.clone(); let lang_p = current_lang.clone();
+    apply_btn.connect_clicked(move |_| {
+        let injector = injector_p.clone(); let game = game_p.clone(); let overlay = overlay_p.clone();
+        let apply_btn = apply_btn_p.clone(); let restore_btn = restore_btn_p.clone(); let copy_btn = copy_btn_p.clone();
+        let lang_f = lang_p.clone();
+        let proceed = move || {
+            let injector_i = injector.clone(); let game_i = game.clone(); let overlay_i = overlay.clone();
+            let apply_btn_i = apply_btn.clone(); let restore_btn_i = restore_btn.clone(); let copy_btn_i = copy_btn.clone();
+            let lang_i = lang_f.clone();
+            glib::spawn_future_local(async move {
+                let game_t = game_i.clone();
+                let res = tokio::task::spawn_blocking(move || injector_i.backup_and_deploy(&game_t)).await.unwrap();
+                if res.is_ok() { 
+                    let t = if *lang_i.lock().unwrap() == Language::RU { &RU_TRANS } else { &EN_TRANS };
+                    apply_btn_i.set_label(t.status_patched); apply_btn_i.set_sensitive(false);
+                    restore_btn_i.set_sensitive(true); copy_btn_i.set_visible(game_i.game_type == GameType::Proton);
+                    overlay_i.add_toast(Toast::new(if *lang_i.lock().unwrap() == Language::RU { "Успешно!" } else { "Success!" })); 
+                }
+            });
+        };
+        if game_p.is_online_multiplayer {
+            let t = if *lang_p.lock().unwrap() == Language::RU { &RU_TRANS } else { &EN_TRANS };
+            let dialog = MessageDialog::builder().transient_for(&window_p).heading(t.confirm_title).body(t.confirm_body).build();
+            dialog.add_response("cancel", t.confirm_no); dialog.add_response("proceed", t.confirm_yes);
+            dialog.set_response_appearance("proceed", ResponseAppearance::Destructive);
+            let proceed_t = proceed;
+            dialog.connect_response(None, move |d, res| { if res == "proceed" { proceed_t(); } d.close(); });
+            dialog.present();
+        } else { proceed(); }
+    });
+
+    let injector_r = injector.clone(); let game_r = game.clone(); let overlay_r = toast_overlay.clone();
+    let apply_btn_r = apply_btn.clone(); let restore_btn_r = restore_btn.clone(); let copy_btn_r = copy_btn.clone();
+    let lang_r = current_lang.clone();
+    restore_btn.connect_clicked(move |_| {
+        let injector_i = injector_r.clone(); let game_i = game_r.clone(); let overlay_i = overlay_r.clone();
+        let apply_btn_i = apply_btn_r.clone(); let restore_btn_i = restore_btn_r.clone(); let copy_btn_i = copy_btn_r.clone();
+        let lang_i = lang_r.clone();
+        glib::spawn_future_local(async move {
+            let res = tokio::task::spawn_blocking(move || injector_i.restore_original(&game_i)).await.unwrap();
+            if res.is_ok() { 
+                let t = if *lang_i.lock().unwrap() == Language::RU { &RU_TRANS } else { &EN_TRANS };
+                apply_btn_i.set_label(t.apply_patch); apply_btn_i.set_sensitive(true);
+                restore_btn_i.set_sensitive(false); copy_btn_i.set_visible(false);
+                overlay_i.add_toast(Toast::new(if *lang_i.lock().unwrap() == Language::RU { "Восстановлено!" } else { "Restored!" })); 
+            }
+        });
+    });
     row
 }

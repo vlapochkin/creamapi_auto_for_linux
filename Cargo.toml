@@ -1,6 +1,6 @@
 [package]
-name = "cream-api-auto"
-version = "0.1.0"
+name = "vapordose"
+version = "0.2.5"
 edition = "2021"
 
 [dependencies]

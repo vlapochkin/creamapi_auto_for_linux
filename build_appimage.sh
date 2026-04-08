@@ -2,8 +2,8 @@
 
 set -e
 
-APP_NAME="cream-api-auto"
-BIN_NAME="cream-api-auto"
+APP_NAME="VaporDose"
+BIN_NAME="vapordose"
 APP_DIR="AppDir"
 
 echo "Building $APP_NAME..."
@@ -12,52 +12,68 @@ cargo build --release
 echo "Preparing AppDir..."
 rm -rf $APP_DIR
 mkdir -p $APP_DIR/usr/bin
+mkdir -p $APP_DIR/usr/lib
 mkdir -p $APP_DIR/usr/share/applications
 mkdir -p $APP_DIR/usr/share/icons/hicolor/scalable/apps
 
-# Copy binary and resources
-# Download SmokeAPI core if missing
+# Copy binary
+cp target/release/$BIN_NAME $APP_DIR/usr/bin/
+
+# Ensure resources are present and copy them to /usr/bin/resources (where code expects them)
 if [ ! -d "resources" ] || [ -z "$(ls -A resources)" ]; then
     echo "Resources missing. Downloading SmokeAPI..."
     mkdir -p resources
-    # Use the same logic as updater: download from GitHub
     LATEST_RELEASE=$(curl -s https://api.github.com/repos/acidicoala/SmokeAPI/releases/latest)
     DOWNLOAD_URL=$(echo $LATEST_RELEASE | grep -o 'https://github.com/acidicoala/SmokeAPI/releases/download/[^"]*.zip' | head -n 1)
     wget -q -O smokeapi.zip "$DOWNLOAD_URL"
     unzip -o smokeapi.zip -d resources
     rm smokeapi.zip
-    # Get tag name for version.txt
     TAG_NAME=$(echo $LATEST_RELEASE | grep -o '"tag_name": "[^"]*"' | head -n 1 | cut -d'"' -f4)
     echo "$TAG_NAME" > resources/version.txt
 fi
-
-cp target/release/$BIN_NAME $APP_DIR/usr/bin/
 cp -r resources $APP_DIR/usr/bin/
 
-# Copy desktop file and icon
-cp $BIN_NAME.desktop $APP_DIR/usr/share/applications/
-# Use a generic icon for now, or you can provide a real one
-# cp icon.svg $APP_DIR/usr/share/icons/hicolor/scalable/apps/$APP_NAME.svg
+# Icon
+curl -L -o $APP_DIR/usr/share/icons/hicolor/scalable/apps/$BIN_NAME.svg https://raw.githubusercontent.com/GNOME/adwaita-icon-theme/master/Adwaita/scalable/apps/preferences-system-symbolic.svg
 
-# Download linuxdeploy and gtk plugin if not present
+# Desktop file
+cat > $APP_DIR/usr/share/applications/$BIN_NAME.desktop <<EOF
+[Desktop Entry]
+Name=$APP_NAME
+Comment=Steam DLC Automation for Linux
+Exec=$BIN_NAME
+Icon=$BIN_NAME
+Terminal=false
+Type=Application
+Categories=Utility;Game;
+EOF
+
+# Create a custom AppRun script to avoid library conflicts
+cat > $APP_DIR/AppRun <<EOF
+#!/bin/sh
+SELF=\$(readlink -f "\$0")
+HERE=\$(parent "\$SELF")
+export PATH="\$HERE/usr/bin:\$PATH"
+export LD_LIBRARY_PATH="\$HERE/usr/lib:\$LD_LIBRARY_PATH"
+export XDG_DATA_DIRS="\$HERE/usr/share:\$XDG_DATA_DIRS"
+exec "\$HERE/usr/bin/$BIN_NAME" "\$@"
+EOF
+chmod +x $APP_DIR/AppRun
+
+# Download linuxdeploy if missing
 if [ ! -f linuxdeploy-x86_64.AppImage ]; then
-    echo "Downloading linuxdeploy..."
-    wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+    curl -L -o linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
     chmod +x linuxdeploy-x86_64.AppImage
 fi
 
-if [ ! -f linuxdeploy-plugin-gtk-x86_64.AppImage ]; then
-    echo "Downloading linuxdeploy-plugin-gtk..."
-    wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage
-    chmod +x linuxdeploy-plugin-gtk-x86_64.AppImage
-fi
-
-# Run linuxdeploy
+# Run linuxdeploy with NO_STRIP and excluding problematic libs
 export OUTPUT="$APP_NAME-x86_64.AppImage"
-./linuxdeploy-x86_64.AppImage --appdir $APP_DIR \
-    --plugin gtk \
-    --output appimage \
-    --desktop-file $APP_DIR/usr/share/applications/$BIN_NAME.desktop \
-    --executable $APP_DIR/usr/bin/$BIN_NAME
+export APPIMAGE_EXTRACT_AND_RUN=1
+export NO_STRIP=1
 
-echo "AppImage created: $OUTPUT"
+# We use linuxdeploy to bundle only essential app dependencies
+./linuxdeploy-x86_64.AppImage --appdir $APP_DIR \
+    --output appimage \
+    --desktop-file $APP_DIR/usr/share/applications/$BIN_NAME.desktop
+
+echo "AppImage recreated: $OUTPUT"
