@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev wget file fuse libfuse2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build AppImage
+        run: |
+          chmod +x build_appimage.sh
+          # Extract and run AppImages to avoid FUSE issues in CI
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./build_appimage.sh
+
+      - name: Create Release and Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cream-api-auto-x86_64.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
