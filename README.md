@@ -17,8 +17,10 @@ It scans your Steam installations (internal SSDs, Flatpak, MicroSD cards, extern
 
 ---
 
-### ✨ Features in v0.4.0
+### ✨ Features in v0.5.0
 
+- 🚀 **Steam Launch Options Auto-Injector**: Automatically injects and cleans up `WINEDLLOVERRIDES="steam_api64=n,b;steam_api=n,b"` in Steam `localconfig.vdf` when patching/restoring Proton games!
+- 🔄 **SmokeAPI Binary Manager & Auto-Updater**: Check for SmokeAPI GitHub updates directly from the app menu and install fresh proxy binaries with 1 click.
 - 🎮 **Steam Deck & SteamOS Ready**: Touchscreen friendly, compact 1280x800 resolution support, full **D-Pad / Gamepad navigation** support.
 - 🎴 **MicroSD & Drive Auto-Discovery**: Automatically finds games installed on external mounts (`/run/media/`).
 - 🌐 **Steam DLC Auto-Fetcher**: Fetch official DLC IDs and names directly from the Steam Store API with 1-click.
@@ -94,8 +96,10 @@ VaporDose is a frontend management interface. We are immensely grateful to the d
 
 ---
 
-### ✨ Новые возможности v0.4.0
+### ✨ Новые возможности v0.5.0
 
+- 🚀 **Авто-инъекция параметров запуска Steam**: Автоматическое внесение и чистка `WINEDLLOVERRIDES="steam_api64=n,b;steam_api=n,b"` в файлах `localconfig.vdf` при патчинге/восстановлении Proton-игр!
+- 🔄 **Менеджер и авто-обновление SmokeAPI**: Онлайн-проверка обновлений SmokeAPI с GitHub и скачивание актуальных бинарников прямо из меню приложения в 1 клик.
 - 🎮 **Оптимизация для Steam Deck**: Поддержка разрешения 1280x800, крупный интерфейс для тачскрина и полная **навигация с геймпада / D-Pad**.
 - 🎴 **Авто-поиск на MicroSD картах**: Автоматическое обнаружение игр на внешних дисках и флешках (`/run/media/`).
 - 🌐 **Авто-загрузка DLC из Steam**: Импорт названий и ID всех официальных дополнений из Steam Store API в 1 клик.

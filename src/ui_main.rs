@@ -199,10 +199,84 @@ pub fn build_ui(app: &libadwaita::Application) {
     let s_ru = setup_lang.clone(); app.add_action(&{let a = gio::SimpleAction::new("set_lang_ru", None); a.connect_activate(move |_, _| s_ru(Language::RU)); a});
     let s_en = setup_lang.clone(); app.add_action(&{let a = gio::SimpleAction::new("set_lang_en", None); a.connect_activate(move |_, _| s_en(Language::EN)); a});
 
+    let overlay_smoke = toast_overlay.clone();
+    let window_smoke = window.clone();
+    let lang_smoke = current_lang.clone();
+    app.add_action(&{
+        let a = gio::SimpleAction::new("update_smokeapi", None);
+        a.connect_activate(move |_, _| {
+            let ov = overlay_smoke.clone();
+            let win = window_smoke.clone();
+            let l = lang_smoke.clone();
+            glib::spawn_future_local(async move {
+                ov.add_toast(Toast::new("Проверка обновлений SmokeAPI..."));
+                match crate::smokeapi_manager::check_for_updates().await {
+                    Ok(status) => {
+                        let is_ru = *l.lock().unwrap() == Language::RU;
+                        if status.update_available {
+                            let latest = status.latest_version.unwrap_or_default();
+                            let dialog = MessageDialog::builder()
+                                .transient_for(&win)
+                                .heading(if is_ru { "Доступно обновление SmokeAPI" } else { "SmokeAPI Update Available" })
+                                .body(if is_ru {
+                                    format!("Установлена версия: {}\nДоступна новая версия: {}\n\nЗагрузить и обновить?", status.installed_version, latest)
+                                } else {
+                                    format!("Installed: {}\nLatest: {}\n\nDownload and install?", status.installed_version, latest)
+                                })
+                                .build();
+                            dialog.add_response("cancel", if is_ru { "Отмена" } else { "Cancel" });
+                            dialog.add_response("update", if is_ru { "Обновить" } else { "Update" });
+                            dialog.set_response_appearance("update", ResponseAppearance::Suggested);
+
+                            let ov_down = ov.clone();
+                            let l_down = l.clone();
+                            dialog.connect_response(None, move |d, res| {
+                                if res == "update" {
+                                    let ov_i = ov_down.clone();
+                                    let l_i = l_down.clone();
+                                    glib::spawn_future_local(async move {
+                                        ov_i.add_toast(Toast::new("Загрузка SmokeAPI..."));
+                                        match crate::smokeapi_manager::download_and_install_latest().await {
+                                            Ok(ver) => {
+                                                let msg = if *l_i.lock().unwrap() == Language::RU {
+                                                    format!("SmokeAPI успешно обновлен до {}!", ver)
+                                                } else {
+                                                    format!("SmokeAPI updated to {}!", ver)
+                                                };
+                                                ov_i.add_toast(Toast::new(&msg));
+                                            }
+                                            Err(e) => {
+                                                ov_i.add_toast(Toast::new(&format!("Ошибка обновления: {}", e)));
+                                            }
+                                        }
+                                    });
+                                }
+                                d.close();
+                            });
+                            dialog.present();
+                        } else {
+                            let msg = if is_ru {
+                                format!("У вас установлена последняя версия SmokeAPI ({})", status.installed_version)
+                            } else {
+                                format!("SmokeAPI is up to date ({})", status.installed_version)
+                            };
+                            ov.add_toast(Toast::new(&msg));
+                        }
+                    }
+                    Err(e) => {
+                        ov.add_toast(Toast::new(&format!("Ошибка проверки: {}", e)));
+                    }
+                }
+            });
+        });
+        a
+    });
+
     let lang_menu_btn = MenuButton::builder().icon_name("view-more-symbolic").menu_model(&{
         let m = gio::Menu::new();
         m.append(Some("Русский"), Some("app.set_lang_ru"));
         m.append(Some("English"), Some("app.set_lang_en"));
+        m.append(Some("Обновить SmokeAPI"), Some("app.update_smokeapi"));
         m
     }).build();
     header_bar.pack_start(&lang_menu_btn);

@@ -5,6 +5,8 @@ mod injector;
 mod ui_main;
 mod updater;
 mod utils;
+mod steam_vdf;
+mod smokeapi_manager;
 
 
 use libadwaita::prelude::*;
