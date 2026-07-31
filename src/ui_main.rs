@@ -57,8 +57,10 @@ pub fn build_ui(app: &libadwaita::Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("VaporDose")
-        .default_width(980)
-        .default_height(850)
+        .default_width(920)
+        .default_height(640)
+        .width_request(360)
+        .height_request(500)
         .build();
 
     let toast_overlay = ToastOverlay::new();
@@ -353,7 +355,7 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     let full_subtitle = format!("{} {}", game.install_dir.to_string_lossy(), subtitle_info.join(" "));
     let escaped_title = glib::markup_escape_text(&game.name);
     let escaped_subtitle = glib::markup_escape_text(&full_subtitle);
-    let row = ExpanderRow::builder().title(escaped_title).subtitle(escaped_subtitle).build();
+    let row = ExpanderRow::builder().title(escaped_title).subtitle(escaped_subtitle).focusable(true).build();
 
     if let Some(child) = row.first_child() {
         if let Some(box_widget) = child.downcast_ref::<Box>() {
@@ -371,7 +373,7 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     else { icon_img.set_icon_name(Some("input-gaming-symbolic")); }
     prefix_box.append(&icon_img);
 
-    let folder_btn = Button::builder().icon_name("folder-open-symbolic").css_classes(vec!["flat".to_string()]).tooltip_text(trans.open_folder).build();
+    let folder_btn = Button::builder().icon_name("folder-open-symbolic").css_classes(vec!["flat".to_string()]).tooltip_text(trans.open_folder).focusable(true).build();
     let dir_clone = game.install_dir.clone();
     folder_btn.connect_clicked(move |_| { Command::new("xdg-open").arg(&dir_clone).spawn().ok(); });
     prefix_box.append(&folder_btn);
@@ -385,9 +387,9 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     };
     let status_dot = Label::builder().label("●").css_classes(vec![status_color.to_string(), "title-1".to_string()]).tooltip_text(status_text).build();
     suffix_box.append(&status_dot);
-    let apply_btn = Button::builder().css_classes(vec!["suggested-action".to_string()]).build();
-    let restore_btn = Button::builder().label(trans.restore).css_classes(vec!["destructive-action".to_string()]).build();
-    let copy_btn = Button::builder().icon_name("edit-copy-symbolic").tooltip_text(trans.copy_params).build();
+    let apply_btn = Button::builder().css_classes(vec!["suggested-action".to_string()]).focusable(true).build();
+    let restore_btn = Button::builder().label(trans.restore).css_classes(vec!["destructive-action".to_string()]).focusable(true).build();
+    let copy_btn = Button::builder().icon_name("edit-copy-symbolic").tooltip_text(trans.copy_params).focusable(true).build();
     suffix_box.append(&apply_btn); suffix_box.append(&restore_btn); suffix_box.append(&copy_btn);
     row.add_suffix(&suffix_box);
 
@@ -395,7 +397,7 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     let dlc_text = if game.dlc_list.is_empty() { "None".to_string() } else { game.dlc_list.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ") };
     let dlc_row = ActionRow::builder().title(trans.dlc_list_title).subtitle(dlc_text.clone()).build();
 
-    let edit_dlc_btn = Button::builder().label(trans.edit_dlc).css_classes(vec!["flat".to_string()]).build();
+    let edit_dlc_btn = Button::builder().label(trans.edit_dlc).css_classes(vec!["flat".to_string()]).focusable(true).build();
     let injector_edit = injector.clone();
     let game_edit = game.clone();
     let overlay_edit = toast_overlay.clone();

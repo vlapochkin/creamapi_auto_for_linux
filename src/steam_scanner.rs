@@ -53,7 +53,7 @@ pub fn discover_steam_libraries() -> Vec<PathBuf> {
         }
     }
     let mut all_libraries = libraries.clone();
-    for steam_path in libraries {
+    for steam_path in &libraries {
         let vdf_path = steam_path.join("steamapps/libraryfolders.vdf");
         if let Ok(extra_paths) = parse_library_folders(&vdf_path) {
             for path in extra_paths {
@@ -66,6 +66,43 @@ pub fn discover_steam_libraries() -> Vec<PathBuf> {
             }
         }
     }
+
+    // Auto-detect MicroSD cards and external mounts (/run/media/ & /run/media/$USER/*) for Steam Deck
+    let run_media = Path::new("/run/media");
+    if run_media.exists() {
+        let mut search_dirs = vec![run_media.to_path_buf()];
+        let user = std::env::var("USER").unwrap_or_default();
+        if !user.is_empty() {
+            let user_media = run_media.join(&user);
+            if user_media.exists() {
+                search_dirs.push(user_media);
+            }
+        }
+        for s_dir in search_dirs {
+            if let Ok(entries) = fs::read_dir(&s_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        let steamapps = p.join("steamapps");
+                        if steamapps.exists() {
+                            let real_path = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+                            if !all_libraries.contains(&real_path) {
+                                all_libraries.push(real_path);
+                            }
+                        }
+                        let steam_lib = p.join("SteamLibrary");
+                        if steam_lib.exists() {
+                            let real_path = fs::canonicalize(&steam_lib).unwrap_or_else(|_| p.clone());
+                            if !all_libraries.contains(&real_path) {
+                                all_libraries.push(real_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     all_libraries
 }
 
