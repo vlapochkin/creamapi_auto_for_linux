@@ -80,8 +80,14 @@ pub fn build_ui(app: &libadwaita::Application) {
     let games_list = ListBox::builder().selection_mode(SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
     games_group.add(&games_list);
     let system_group = PreferencesGroup::builder().build();
+    let system_expander = ExpanderRow::builder()
+        .title("Системные компоненты и инструменты (Proton / SDK)")
+        .enable_expansion(true)
+        .expanded(false)
+        .build();
     let system_list = ListBox::builder().selection_mode(SelectionMode::None).css_classes(vec!["boxed-list".to_string()]).build();
-    system_group.add(&system_list);
+    system_expander.add_row(&system_list);
+    system_group.add(&system_expander);
     content_box.append(&games_group); content_box.append(&system_group);
 
     let loading_box = Box::builder().orientation(Orientation::Vertical).spacing(20).valign(Align::Center).halign(Align::Center).build();
@@ -207,46 +213,119 @@ pub fn build_ui(app: &libadwaita::Application) {
     let injector_batch_p = injector.clone();
     let overlay_batch_p = toast_overlay.clone();
     let scan_trigger_p = run_scan_arc.clone();
+    let window_p = window.clone();
+
     batch_patch_btn.connect_clicked(move |_| {
-        let games = loaded_games_patch.lock().unwrap().clone();
+        let dialog = MessageDialog::builder()
+            .transient_for(&window_p)
+            .heading("Патчинг всех игр")
+            .body("Вы действительно хотите автоматически пропатчить все доступные безопасные игры?\n\nИгры с античитом и сетевым режимом будут автоматически пропущены.")
+            .build();
+        
+        dialog.add_response("cancel", "Отмена");
+        dialog.add_response("patch", "Пропатчить всё");
+        dialog.set_response_appearance("patch", ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        let games_store = loaded_games_patch.clone();
         let injector = injector_batch_p.clone();
         let overlay = overlay_batch_p.clone();
         let refresh = scan_trigger_p.clone();
 
-        glib::spawn_future_local(async move {
-            tokio::task::spawn_blocking(move || {
-                for game in games {
-                    if game.category != AppCategory::SystemTool && !game.has_anticheat && !game.is_patched {
-                        let _ = injector.backup_and_deploy(&game);
+        dialog.connect_response(None, move |_, response| {
+            if response == "patch" {
+                let games = games_store.lock().unwrap().clone();
+                let injector = injector.clone();
+                let overlay = overlay.clone();
+                let refresh = refresh.clone();
+
+                glib::spawn_future_local(async move {
+                    let count = tokio::task::spawn_blocking(move || {
+                        let mut patched = 0;
+                        for game in games {
+                            if game.category != AppCategory::SystemTool 
+                                && !game.has_anticheat 
+                                && !game.is_online_multiplayer
+                                && !game.is_patched 
+                                && !game.targets.is_empty() 
+                            {
+                                if injector.backup_and_deploy(&game).is_ok() {
+                                    patched += 1;
+                                }
+                            }
+                        }
+                        patched
+                    }).await.unwrap_or(0);
+
+                    if count > 0 {
+                        overlay.add_toast(Toast::new(&format!("Успешно пропатчено игр: {}", count)));
+                    } else {
+                        overlay.add_toast(Toast::new("Нет доступных игр для патчинга"));
                     }
-                }
-            }).await.unwrap();
-            overlay.add_toast(Toast::new("Пакетный патчинг завершён!"));
-            refresh();
+                    refresh();
+                });
+            }
         });
+
+        dialog.present();
     });
 
     let loaded_games_restore = loaded_games.clone();
     let injector_batch_r = injector.clone();
     let overlay_batch_r = toast_overlay.clone();
     let scan_trigger_r = run_scan_arc.clone();
+    let window_r = window.clone();
+
     batch_restore_btn.connect_clicked(move |_| {
-        let games = loaded_games_restore.lock().unwrap().clone();
+        let dialog = MessageDialog::builder()
+            .transient_for(&window_r)
+            .heading("Восстановление всех игр")
+            .body("Вы уверены, что хотите восстановить оригинальные файлы для всех пропатченных игр?")
+            .build();
+        
+        dialog.add_response("cancel", "Отмена");
+        dialog.add_response("restore", "Восстановить всё");
+        dialog.set_response_appearance("restore", ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        let games_store = loaded_games_restore.clone();
         let injector = injector_batch_r.clone();
         let overlay = overlay_batch_r.clone();
         let refresh = scan_trigger_r.clone();
 
-        glib::spawn_future_local(async move {
-            tokio::task::spawn_blocking(move || {
-                for game in games {
-                    if game.is_patched {
-                        let _ = injector.restore_original(&game);
+        dialog.connect_response(None, move |_, response| {
+            if response == "restore" {
+                let games = games_store.lock().unwrap().clone();
+                let injector = injector.clone();
+                let overlay = overlay.clone();
+                let refresh = refresh.clone();
+
+                glib::spawn_future_local(async move {
+                    let count = tokio::task::spawn_blocking(move || {
+                        let mut restored = 0;
+                        for game in games {
+                            if game.is_patched {
+                                if injector.restore_original(&game).is_ok() {
+                                    restored += 1;
+                                }
+                            }
+                        }
+                        restored
+                    }).await.unwrap_or(0);
+
+                    if count > 0 {
+                        overlay.add_toast(Toast::new(&format!("Восстановлено игр: {}", count)));
+                    } else {
+                        overlay.add_toast(Toast::new("Нет пропатченных игр для восстановления"));
                     }
-                }
-            }).await.unwrap();
-            overlay.add_toast(Toast::new("Все игры восстановлены!"));
-            refresh();
+                    refresh();
+                });
+            }
         });
+
+        dialog.present();
     });
 
     header_bar.pack_start(&batch_patch_btn);
