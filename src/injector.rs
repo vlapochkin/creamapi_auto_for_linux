@@ -93,14 +93,9 @@ impl Injector {
             self.write_smoke_config(&app_specific, &game.appid, &[])?;
         }
 
-        // Auto-inject launch options into Steam localconfig.vdf
-        for target in &game.targets {
-            if target.is_linux {
-                let ld_preload_str = format!(r#"LD_PRELOAD=\"{}\""#, target.path.display());
-                crate::steam_vdf::apply_launch_options(&game.appid, &ld_preload_str).ok();
-            } else {
-                crate::steam_vdf::apply_proton_launch_options(&game.appid).ok();
-            }
+        // Auto-inject Proton WINEDLLOVERRIDES into Steam localconfig.vdf if game has Windows targets
+        if game.targets.iter().any(|t| !t.is_linux) {
+            crate::steam_vdf::apply_proton_launch_options(&game.appid).ok();
         }
 
         Ok(())
