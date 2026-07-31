@@ -237,6 +237,72 @@ fn is_elf64(path: &Path) -> bool {
     true
 }
 
+fn find_game_icon(appid: &str) -> Option<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let cache_dirs = vec![
+        Path::new(&home).join(".steam/root/appcache/librarycache"),
+        Path::new(&home).join(".steam/steam/appcache/librarycache"),
+        Path::new(&home).join(".local/share/Steam/appcache/librarycache"),
+        Path::new(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache"),
+    ];
+
+    for cache_dir in cache_dirs {
+        let direct_icon = cache_dir.join(format!("{}_icon.jpg", appid));
+        if direct_icon.exists() { return Some(direct_icon); }
+        let direct_header = cache_dir.join(format!("{}_header.jpg", appid));
+        if direct_header.exists() { return Some(direct_header); }
+
+        let app_dir = cache_dir.join(appid);
+        if app_dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&app_dir) {
+                let mut hash_jpg = None;
+                let mut logo_png = None;
+                let mut header_jpg = None;
+                let mut any_jpg = None;
+
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        if name.len() >= 40 && name.ends_with(".jpg") {
+                            hash_jpg = Some(path);
+                            break;
+                        } else if name == "logo.png" {
+                            logo_png = Some(path);
+                        } else if name.contains("header") && name.ends_with(".jpg") {
+                            header_jpg = Some(path);
+                        } else if name.ends_with(".jpg") || name.ends_with(".png") {
+                            any_jpg = Some(path);
+                        }
+                    }
+                }
+
+                if let Some(p) = hash_jpg { return Some(p); }
+                if let Some(p) = logo_png { return Some(p); }
+                if let Some(p) = header_jpg { return Some(p); }
+                if let Some(p) = any_jpg { return Some(p); }
+            }
+        }
+    }
+
+    let icon_search_paths = vec![
+        Path::new(&home).join(".local/share/icons"),
+        Path::new("/usr/share/icons").to_path_buf(),
+    ];
+    for search_path in icon_search_paths {
+        if search_path.exists() {
+            for entry in WalkDir::new(&search_path).max_depth(5).into_iter().flatten() {
+                let name = entry.file_name().to_string_lossy();
+                if name.starts_with(&format!("steam_icon_{}", appid)) {
+                    return Some(entry.path().to_path_buf());
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn parse_acf(acf_path: &Path) -> Result<SteamGame> {
     let content = fs::read_to_string(acf_path)?;
     let re_appid = Regex::new(r#""appid"\s+"([^"]+)""#).unwrap();
@@ -252,26 +318,7 @@ fn parse_acf(acf_path: &Path) -> Result<SteamGame> {
     let mut has_native = false;
     let mut is_patched = false;
 
-    // ICON CACHE PATHS (Direct)
-    let mut icon_path = None;
-    let home = std::env::var("HOME").unwrap_or_default();
-    let cache_paths = vec![
-        Path::new(&home).join(".steam/root/appcache/librarycache"),
-        Path::new(&home).join(".steam/steam/appcache/librarycache"),
-        Path::new(&home).join(".local/share/Steam/appcache/librarycache"),
-        Path::new(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache"),
-    ];
-    for p in cache_paths {
-        let candidates = vec![
-            p.join(format!("{}_icon.jpg", appid)),
-            p.join(format!("{}_header.jpg", appid)),
-            p.join(format!("{}_logo.png", appid)),
-        ];
-        for candidate in candidates {
-            if candidate.exists() { icon_path = Some(candidate); break; }
-        }
-        if icon_path.is_some() { break; }
-    }
+    let icon_path = find_game_icon(&appid);
 
     if install_dir.exists() {
         for entry in WalkDir::new(&install_dir).max_depth(5).into_iter().flatten() {
