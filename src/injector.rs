@@ -31,14 +31,15 @@ impl Injector {
                 "steam_api.dll" => ("steam_api_o.dll", "smoke_api32.dll"),
                 "libsteam_api.so" => {
                     let res = if target.is_64bit { "libsmoke_api64.so" } else { "libsmoke_api32.so" };
-                    ("libsteam_api_o.so", res)
+                    ("libsteam_api.so.orig", res)
                 }
                 _ => anyhow::bail!("Unknown target file: {}", filename),
             };
 
             let backup_path = target.path.with_file_name(backup_name);
-            
-            // Step 1: Backup (Rename original to _o)
+            let root_backup_path = game.install_dir.join("libsteam_api_o.so");
+
+            // Step 1: Backup (Rename original to .orig / root _o.so)
             if !backup_path.exists() {
                 if target.path.exists() {
                     if let Err(_) = fs::rename(&target.path, &backup_path) {
@@ -48,6 +49,9 @@ impl Injector {
                             }
                             return Err(e).with_context(|| format!("Failed to backup {:?}", target.path));
                         }
+                    }
+                    if target.is_linux {
+                        fs::copy(&backup_path, &root_backup_path).ok();
                     }
                 } else {
                     anyhow::bail!("Original file missing: {:?}", target.path);
@@ -112,7 +116,7 @@ impl Injector {
             let backup_name = match filename.as_ref() {
                 "steam_api64.dll" => "steam_api64_o.dll",
                 "steam_api.dll" => "steam_api_o.dll",
-                "libsteam_api.so" => "libsteam_api_o.so",
+                "libsteam_api.so" => "libsteam_api.so.orig",
                 _ => continue,
             };
 
@@ -133,11 +137,13 @@ impl Injector {
             }
         }
 
-        // Clean root config
+        // Clean root config & backups
         let root_config = game.install_dir.join("SmokeAPI.config.json");
         let root_ini = game.install_dir.join("cream_api.ini");
+        let root_backup = game.install_dir.join("libsteam_api_o.so");
         fs::remove_file(&root_config).ok();
         fs::remove_file(&root_ini).ok();
+        fs::remove_file(&root_backup).ok();
 
         // Clean user config dir
         if let Some(user_config_dir) = get_user_config_dir() {
@@ -145,8 +151,8 @@ impl Injector {
             fs::remove_file(&app_specific).ok();
         }
 
-        // Auto-remove Proton WINEDLLOVERRIDES from Steam localconfig.vdf
-        crate::steam_vdf::remove_proton_launch_options(&game.appid).ok();
+        // Auto-remove launch options from Steam localconfig.vdf
+        crate::steam_vdf::remove_launch_options(&game.appid).ok();
 
         Ok(())
     }
