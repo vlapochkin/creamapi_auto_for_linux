@@ -239,6 +239,39 @@ fn is_elf64(path: &Path) -> bool {
 
 fn find_game_icon(appid: &str) -> Option<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
+    
+    // 1. PRIORITY: Steam Desktop Icons (steam_icon_<appid>.png/svg/ico)
+    let icon_search_paths = vec![
+        Path::new(&home).join(".local/share/icons"),
+        Path::new(&home).join(".icons"),
+        Path::new("/usr/share/icons").to_path_buf(),
+        Path::new("/usr/share/pixmaps").to_path_buf(),
+    ];
+
+    let target_prefix = format!("steam_icon_{}", appid);
+    for search_path in icon_search_paths {
+        if search_path.exists() {
+            let mut candidates = Vec::new();
+            for entry in WalkDir::new(&search_path).max_depth(5).into_iter().flatten() {
+                let name = entry.file_name().to_string_lossy();
+                if name.starts_with(&target_prefix) {
+                    candidates.push(entry.path().to_path_buf());
+                }
+            }
+            if let Some(best) = candidates.into_iter().max_by_key(|p| {
+                let s = p.to_string_lossy();
+                if s.contains("256x256") || s.contains("scalable") { 4 }
+                else if s.contains("128x128") { 3 }
+                else if s.contains("64x64") { 2 }
+                else if s.contains("48x48") || s.contains("32x32") { 1 }
+                else { 0 }
+            }) {
+                return Some(best);
+            }
+        }
+    }
+
+    // 2. SECONDARY: appcache/librarycache/<appid>/ (logo.png, header.jpg, hash jpg)
     let cache_dirs = vec![
         Path::new(&home).join(".steam/root/appcache/librarycache"),
         Path::new(&home).join(".steam/steam/appcache/librarycache"),
@@ -247,57 +280,35 @@ fn find_game_icon(appid: &str) -> Option<PathBuf> {
     ];
 
     for cache_dir in cache_dirs {
-        let direct_icon = cache_dir.join(format!("{}_icon.jpg", appid));
-        if direct_icon.exists() { return Some(direct_icon); }
-        let direct_header = cache_dir.join(format!("{}_header.jpg", appid));
-        if direct_header.exists() { return Some(direct_header); }
-
         let app_dir = cache_dir.join(appid);
         if app_dir.is_dir() {
             if let Ok(entries) = fs::read_dir(&app_dir) {
-                let mut hash_jpg = None;
                 let mut logo_png = None;
                 let mut header_jpg = None;
-                let mut any_jpg = None;
+                let mut hash_jpg = None;
 
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file() {
                         let name = path.file_name().unwrap_or_default().to_string_lossy();
-                        if name.len() >= 40 && name.ends_with(".jpg") {
-                            hash_jpg = Some(path);
-                            break;
-                        } else if name == "logo.png" {
+                        if name == "logo.png" {
                             logo_png = Some(path);
                         } else if name.contains("header") && name.ends_with(".jpg") {
                             header_jpg = Some(path);
-                        } else if name.ends_with(".jpg") || name.ends_with(".png") {
-                            any_jpg = Some(path);
+                        } else if name.len() >= 40 && name.ends_with(".jpg") {
+                            hash_jpg = Some(path);
                         }
                     }
                 }
 
-                if let Some(p) = hash_jpg { return Some(p); }
                 if let Some(p) = logo_png { return Some(p); }
                 if let Some(p) = header_jpg { return Some(p); }
-                if let Some(p) = any_jpg { return Some(p); }
+                if let Some(p) = hash_jpg { return Some(p); }
             }
         }
-    }
 
-    let icon_search_paths = vec![
-        Path::new(&home).join(".local/share/icons"),
-        Path::new("/usr/share/icons").to_path_buf(),
-    ];
-    for search_path in icon_search_paths {
-        if search_path.exists() {
-            for entry in WalkDir::new(&search_path).max_depth(5).into_iter().flatten() {
-                let name = entry.file_name().to_string_lossy();
-                if name.starts_with(&format!("steam_icon_{}", appid)) {
-                    return Some(entry.path().to_path_buf());
-                }
-            }
-        }
+        let direct_icon = cache_dir.join(format!("{}_icon.jpg", appid));
+        if direct_icon.exists() { return Some(direct_icon); }
     }
 
     None

@@ -370,15 +370,29 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     let prefix_box = Box::new(Orientation::Horizontal, 12);
     let icon_img = Image::builder().width_request(40).height_request(40).build();
     let mut icon_loaded = false;
-    if let Some(path) = &game.icon_path {
-        if let Ok(texture) = gdk::Texture::from_filename(path) {
-            icon_img.set_paintable(Some(&texture));
-            icon_loaded = true;
-        } else {
-            icon_img.set_from_file(Some(path));
+
+    let icon_name = format!("steam_icon_{}", game.appid);
+    if let Some(display) = gdk::Display::default() {
+        let theme = gtk4::IconTheme::for_display(&display);
+        if theme.has_icon(&icon_name) {
+            icon_img.set_pixel_size(40);
+            icon_img.set_icon_name(Some(&icon_name));
             icon_loaded = true;
         }
     }
+
+    if !icon_loaded {
+        if let Some(path) = &game.icon_path {
+            if let Ok(texture) = gdk::Texture::from_filename(path) {
+                icon_img.set_paintable(Some(&texture));
+                icon_loaded = true;
+            } else {
+                icon_img.set_from_file(Some(path));
+                icon_loaded = true;
+            }
+        }
+    }
+
     if !icon_loaded {
         icon_img.set_pixel_size(40);
         icon_img.set_icon_name(Some("input-gaming-symbolic"));
