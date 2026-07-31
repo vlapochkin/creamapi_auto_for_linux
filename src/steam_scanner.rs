@@ -44,12 +44,26 @@ pub fn discover_steam_libraries() -> Vec<PathBuf> {
         Path::new(&home).join(".steam/steam"),
         Path::new(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
     ];
-    for p in paths { if p.exists() && !libraries.contains(&p) { libraries.push(p); } }
+    for p in paths {
+        if p.exists() {
+            let real_path = fs::canonicalize(&p).unwrap_or(p);
+            if !libraries.contains(&real_path) {
+                libraries.push(real_path);
+            }
+        }
+    }
     let mut all_libraries = libraries.clone();
     for steam_path in libraries {
         let vdf_path = steam_path.join("steamapps/libraryfolders.vdf");
         if let Ok(extra_paths) = parse_library_folders(&vdf_path) {
-            for path in extra_paths { if !all_libraries.contains(&path) { all_libraries.push(path); } }
+            for path in extra_paths {
+                if path.exists() {
+                    let real_path = fs::canonicalize(&path).unwrap_or(path);
+                    if !all_libraries.contains(&real_path) {
+                        all_libraries.push(real_path);
+                    }
+                }
+            }
         }
     }
     all_libraries
@@ -67,9 +81,12 @@ fn parse_library_folders(vdf_path: &Path) -> Result<Vec<PathBuf>> {
 }
 
 use crate::steam_cache::SteamCache;
+use std::collections::HashSet;
 
 pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
     let mut games = Vec::new();
+    let mut seen_appids = HashSet::new();
+
     for lib_path in libraries {
         let apps_path = lib_path.join("steamapps");
         if !apps_path.exists() { continue; }
@@ -77,7 +94,12 @@ pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("acf") {
-                    if let Ok(game) = parse_acf(&path) { games.push(game); }
+                    if let Ok(game) = parse_acf(&path) {
+                        if !seen_appids.contains(&game.appid) {
+                            seen_appids.insert(game.appid.clone());
+                            games.push(game);
+                        }
+                    }
                 }
             }
         }
