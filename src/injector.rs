@@ -1,8 +1,12 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use crate::steam_scanner::SteamGame;
+
+fn get_user_config_dir() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config"))
+}
 
 pub struct Injector {}
 
@@ -67,14 +71,23 @@ impl Injector {
                 return Err(e).with_context(|| format!("Failed to deploy proxy to {:?}", target.path));
             }
 
-            // Step 4: Deploy SmokeAPI v4 config into target dir AND game root install_dir
+            // Step 4: Deploy SmokeAPI v4 config into target dir
             if let Some(parent_dir) = target.path.parent() {
-                self.generate_config(parent_dir)?;
+                self.generate_configs(parent_dir, &game.appid)?;
             }
         }
 
-        // Deploy SmokeAPI config to game root directory as well (crucial for Unity / Paradox games like Cities Skylines)
-        self.generate_config(&game.install_dir)?;
+        // Deploy SmokeAPI config to game root directory (crucial for Unity / Paradox games)
+        self.generate_configs(&game.install_dir, &game.appid)?;
+
+        // Deploy SmokeAPI config to user config directory (~/.config/SmokeAPI/)
+        if let Some(user_config_dir) = get_user_config_dir() {
+            let smoke_config_dir = user_config_dir.join("SmokeAPI");
+            fs::create_dir_all(&smoke_config_dir).ok();
+            self.generate_configs(&smoke_config_dir, &game.appid)?;
+            let app_specific = smoke_config_dir.join(format!("{}.json", game.appid));
+            self.write_smoke_config(&app_specific, &game.appid, &[])?;
+        }
 
         // Auto-inject Proton WINEDLLOVERRIDES into Steam localconfig.vdf if game has Windows targets
         if game.targets.iter().any(|t| !t.is_linux) {
@@ -109,16 +122,22 @@ impl Injector {
 
             if let Some(parent_dir) = target.path.parent() {
                 let config_path = parent_dir.join("SmokeAPI.config.json");
-                if config_path.exists() {
-                    fs::remove_file(&config_path).ok();
-                }
+                let ini_path = parent_dir.join("cream_api.ini");
+                fs::remove_file(&config_path).ok();
+                fs::remove_file(&ini_path).ok();
             }
         }
 
         // Clean root config
         let root_config = game.install_dir.join("SmokeAPI.config.json");
-        if root_config.exists() {
-            fs::remove_file(&root_config).ok();
+        let root_ini = game.install_dir.join("cream_api.ini");
+        fs::remove_file(&root_config).ok();
+        fs::remove_file(&root_ini).ok();
+
+        // Clean user config dir
+        if let Some(user_config_dir) = get_user_config_dir() {
+            let app_specific = user_config_dir.join("SmokeAPI").join(format!("{}.json", game.appid));
+            fs::remove_file(&app_specific).ok();
         }
 
         // Auto-remove Proton WINEDLLOVERRIDES from Steam localconfig.vdf
@@ -127,16 +146,39 @@ impl Injector {
         Ok(())
     }
 
-    /// Generates standard SmokeAPI v4 config JSON
-    fn generate_config(&self, dir: &Path) -> Result<()> {
-        let config_path = dir.join("SmokeAPI.config.json");
-        let content = r#"{
-  "$version": 4,
-  "logging": false,
-  "default_app_status": "unlocked",
-  "override_dlc_status": {}
-}"#;
-        fs::write(&config_path, content).with_context(|| format!("Failed to write SmokeAPI.config.json at {:?}", config_path))?;
+    /// Generates standard SmokeAPI v4 config JSON and cream_api.ini fallback
+    fn generate_configs(&self, dir: &Path, appid: &str) -> Result<()> {
+        let json_path = dir.join("SmokeAPI.config.json");
+        self.write_smoke_config(&json_path, appid, &[])?;
+
+        let ini_path = dir.join("cream_api.ini");
+        let ini_content = format!(
+            "[steam]\nappid = {}\nunlockall = true\nextraprotection = false\n\n[dlc]\n",
+            appid
+        );
+        fs::write(&ini_path, ini_content).ok();
+
+        Ok(())
+    }
+
+    fn write_smoke_config(&self, path: &Path, appid: &str, dlcs: &[&str]) -> Result<()> {
+        let mut override_map = serde_json::Map::new();
+        for id in dlcs {
+            override_map.insert(id.to_string(), serde_json::Value::String("unlocked".to_string()));
+        }
+
+        let mut root_json = serde_json::Map::new();
+        root_json.insert("$version".to_string(), serde_json::Value::Number(4.into()));
+        root_json.insert("logging".to_string(), serde_json::Value::Bool(false));
+        root_json.insert("default_app_status".to_string(), serde_json::Value::String("unlocked".to_string()));
+        root_json.insert("unlock_all".to_string(), serde_json::Value::Bool(true));
+        if let Ok(appid_num) = appid.parse::<u64>() {
+            root_json.insert("appid".to_string(), serde_json::Value::Number(appid_num.into()));
+        }
+        root_json.insert("override_dlc_status".to_string(), serde_json::Value::Object(override_map));
+
+        let formatted = serde_json::to_string_pretty(&root_json).unwrap_or_default();
+        fs::write(path, formatted).with_context(|| format!("Failed to write SmokeAPI config at {:?}", path))?;
         Ok(())
     }
 
@@ -147,27 +189,20 @@ impl Injector {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let mut override_map = serde_json::Map::new();
-        for id in dlc_ids {
-            override_map.insert(id.to_string(), serde_json::Value::String("unlocked".to_string()));
-        }
-
-        let mut root_json = serde_json::Map::new();
-        root_json.insert("$version".to_string(), serde_json::Value::Number(4.into()));
-        root_json.insert("logging".to_string(), serde_json::Value::Bool(false));
-        root_json.insert("default_app_status".to_string(), serde_json::Value::String("unlocked".to_string()));
-        root_json.insert("override_dlc_status".to_string(), serde_json::Value::Object(override_map));
-
-        let formatted = serde_json::to_string_pretty(&root_json).unwrap_or_default();
-
         for target in &game.targets {
             if let Some(parent_dir) = target.path.parent() {
                 let config_path = parent_dir.join("SmokeAPI.config.json");
-                fs::write(&config_path, &formatted).with_context(|| format!("Failed to write custom config"))?;
+                self.write_smoke_config(&config_path, &game.appid, &dlc_ids)?;
             }
         }
         let root_config = game.install_dir.join("SmokeAPI.config.json");
-        fs::write(&root_config, &formatted).ok();
+        self.write_smoke_config(&root_config, &game.appid, &dlc_ids).ok();
+
+        if let Some(user_config_dir) = get_user_config_dir() {
+            let smoke_config_dir = user_config_dir.join("SmokeAPI");
+            let app_specific = smoke_config_dir.join(format!("{}.json", game.appid));
+            self.write_smoke_config(&app_specific, &game.appid, &dlc_ids).ok();
+        }
 
         Ok(())
     }
