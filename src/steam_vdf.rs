@@ -35,8 +35,8 @@ pub fn find_localconfig_files() -> Vec<PathBuf> {
     files
 }
 
-/// Applies Proton launch options for a specific game AppID across all localconfig.vdf files.
-pub fn apply_proton_launch_options(appid: &str) -> Result<bool> {
+/// Applies launch options for a specific game AppID across all localconfig.vdf files.
+pub fn apply_launch_options(appid: &str, override_str: &str) -> Result<bool> {
     let files = find_localconfig_files();
     if files.is_empty() {
         return Ok(false);
@@ -45,7 +45,7 @@ pub fn apply_proton_launch_options(appid: &str) -> Result<bool> {
     let mut updated_any = false;
     for file_path in files {
         if let Ok(content) = fs::read_to_string(&file_path) {
-            let new_content = inject_launch_option_into_vdf(&content, appid, PROTON_OVERRIDE_STR);
+            let new_content = inject_launch_option_into_vdf(&content, appid, override_str);
             if new_content != content {
                 let backup_path = file_path.with_extension("vdf.bak");
                 if !backup_path.exists() {
@@ -60,8 +60,12 @@ pub fn apply_proton_launch_options(appid: &str) -> Result<bool> {
     Ok(updated_any)
 }
 
-/// Removes Proton launch options for a specific game AppID across all localconfig.vdf files.
-pub fn remove_proton_launch_options(appid: &str) -> Result<bool> {
+pub fn apply_proton_launch_options(appid: &str) -> Result<bool> {
+    apply_launch_options(appid, PROTON_OVERRIDE_STR)
+}
+
+/// Removes launch options for a specific game AppID across all localconfig.vdf files.
+pub fn remove_launch_options(appid: &str) -> Result<bool> {
     let files = find_localconfig_files();
     if files.is_empty() {
         return Ok(false);
@@ -70,7 +74,7 @@ pub fn remove_proton_launch_options(appid: &str) -> Result<bool> {
     let mut updated_any = false;
     for file_path in files {
         if let Ok(content) = fs::read_to_string(&file_path) {
-            let new_content = remove_launch_option_from_vdf(&content, appid, PROTON_OVERRIDE_STR);
+            let new_content = remove_launch_option_from_vdf(&content, appid, "");
             if new_content != content {
                 fs::write(&file_path, new_content)
                     .with_context(|| format!("Failed to clean localconfig.vdf at {:?}", file_path))?;
@@ -79,6 +83,10 @@ pub fn remove_proton_launch_options(appid: &str) -> Result<bool> {
         }
     }
     Ok(updated_any)
+}
+
+pub fn remove_proton_launch_options(appid: &str) -> Result<bool> {
+    remove_launch_options(appid)
 }
 
 /// Finds the inner block range `(open_brace_pos + 1, close_brace_pos)` of an app block `"<appid>"\n{ ... }`
@@ -107,7 +115,7 @@ fn find_app_block_range(vdf_content: &str, appid: &str) -> Option<(usize, usize)
 pub fn inject_launch_option_into_vdf(vdf_content: &str, appid: &str, override_str: &str) -> String {
     if let Some((start_inner, end_inner)) = find_app_block_range(vdf_content, appid) {
         let block_str = &vdf_content[start_inner..end_inner];
-        if block_str.contains("WINEDLLOVERRIDES=") {
+        if block_str.contains(override_str) {
             return vdf_content.to_string(); // Already injected
         }
 
@@ -154,21 +162,27 @@ pub fn remove_launch_option_from_vdf(vdf_content: &str, appid: &str, override_st
 
         if let Some(opt_cap) = launch_opt_regex.captures(block_str) {
             let current_opts = opt_cap.get(1).unwrap().as_str();
-            let cleaned_opts = current_opts
-                .replace(override_str, "")
+            let mut cleaned_opts = current_opts
                 .replace("WINEDLLOVERRIDES=\"steam_api64=n,b;steam_api=n,b\"", "")
-                .replace("WINEDLLOVERRIDES=\\\"steam_api64=n,b;steam_api=n,b\\\"", "")
-                .replace("%command%", "")
-                .trim()
-                .to_string();
+                .replace("WINEDLLOVERRIDES=\\\"steam_api64=n,b;steam_api=n,b\\\"", "");
 
-            let replacement = if cleaned_opts.is_empty() {
+            if !override_str.is_empty() {
+                cleaned_opts = cleaned_opts.replace(override_str, "");
+            }
+
+            // Remove any LD_PRELOAD lines
+            let re_ld = regex::Regex::new(r#"LD_PRELOAD="[^"]*"\s*"#).unwrap();
+            cleaned_opts = re_ld.replace_all(&cleaned_opts, "").to_string();
+
+            let cleaned_trimmed = cleaned_opts.replace("%command%", "").trim().to_string();
+
+            let replacement = if cleaned_trimmed.is_empty() {
                 "".to_string()
             } else {
-                let final_opts = if current_opts.contains("%command%") && !cleaned_opts.contains("%command%") {
-                    format!("{} %command%", cleaned_opts)
+                let final_opts = if current_opts.contains("%command%") && !cleaned_trimmed.contains("%command%") {
+                    format!("{} %command%", cleaned_trimmed)
                 } else {
-                    cleaned_opts
+                    cleaned_trimmed
                 };
                 format!("\"LaunchOptions\"\t\t\"{}\"", final_opts)
             };
