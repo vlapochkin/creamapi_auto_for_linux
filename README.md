@@ -1,6 +1,6 @@
 # VaporDose (Steam DLC Automation & Manager for Linux & Steam Deck)
 
-[![GitHub Release](https://img.shields.io/github/v/release/vlapochkin/creamapi_auto_for_linux?style=for-the-badge&color=blue)](https://github.com/vlapochkin/creamapi_auto_for_linux/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/vlapochkin/vapordose?style=for-the-badge&color=blue)](https://github.com/vlapochkin/vapordose/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20SteamOS%20%7C%20Steam%20Deck-informational?style=for-the-badge&logo=steamos)](https://store.steampowered.com/steamos)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Built With](https://img.shields.io/badge/Built%20With-Rust%20%26%20GTK4%2FLibadwaita-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
@@ -34,7 +34,7 @@ It scans your Steam installations (internal SSDs, Flatpak, MicroSD cards, extern
 
 #### Option 1: AppImage (Recommended for Steam Deck & All Linux Distros)
 
-1. Download `VaporDose-x86_64.AppImage` from the **[Releases](https://github.com/vlapochkin/creamapi_auto_for_linux/releases)** page.
+1. Download `VaporDose-x86_64.AppImage` from the **[Releases](https://github.com/vlapochkin/vapordose/releases)** page.
 2. Open terminal in your downloads folder and make it executable:
    ```bash
    chmod +x VaporDose-x86_64.AppImage
@@ -59,8 +59,8 @@ Requirements: `rustc`, `cargo`, `libgtk-4-dev`, `libadwaita-1-dev`.
 
 ```bash
 # Clone repository
-git clone https://github.com/vlapochkin/creamapi_auto_for_linux.git
-cd creamapi_auto_for_linux
+git clone https://github.com/vlapochkin/vapordose.git
+cd vapordose
 
 # Build and run
 cargo run --release
@@ -111,7 +111,7 @@ VaporDose is a frontend management interface. We are immensely grateful to the d
 
 #### Способ 1: AppImage (Рекомендуется для Steam Deck и всех Linux дистрибутивов)
 
-1. Скачайте файл `VaporDose-x86_64.AppImage` со страницы **[Releases](https://github.com/vlapochkin/creamapi_auto_for_linux/releases)**.
+1. Скачайте файл `VaporDose-x86_64.AppImage` со страницы **[Releases](https://github.com/vlapochkin/vapordose/releases)**.
 2. Откройте терминал в папке с файлом и сделайте его исполняемым:
    ```bash
    chmod +x VaporDose-x86_64.AppImage
@@ -136,8 +136,8 @@ VaporDose is a frontend management interface. We are immensely grateful to the d
 
 ```bash
 # Клонирование репозитория
-git clone https://github.com/vlapochkin/creamapi_auto_for_linux.git
-cd creamapi_auto_for_linux
+git clone https://github.com/vlapochkin/vapordose.git
+cd vapordose
 
 # Сборка и запуск
 cargo run --release
