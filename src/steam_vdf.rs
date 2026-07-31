@@ -91,8 +91,12 @@ pub fn remove_proton_launch_options(appid: &str) -> Result<bool> {
 
 /// Finds the inner block range `(open_brace_pos + 1, close_brace_pos)` of an app block `"<appid>"\n{ ... }`
 fn find_app_block_range(vdf_content: &str, appid: &str) -> Option<(usize, usize)> {
+    let apps_pos = vdf_content.find("\"apps\"")?;
+    let search_slice = &vdf_content[apps_pos..];
     let key = format!("\"{}\"", appid);
-    let key_pos = vdf_content.find(&key)?;
+    let key_rel = search_slice.find(&key)?;
+    let key_pos = apps_pos + key_rel;
+
     let after_key = &vdf_content[key_pos + key.len()..];
     let open_brace_rel = after_key.find('{')?;
     let open_brace_pos = key_pos + key.len() + open_brace_rel;
