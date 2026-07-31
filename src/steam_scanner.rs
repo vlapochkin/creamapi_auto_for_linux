@@ -66,6 +66,8 @@ fn parse_library_folders(vdf_path: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+use crate::steam_cache::SteamCache;
+
 pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
     let mut games = Vec::new();
     for lib_path in libraries {
@@ -81,7 +83,12 @@ pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
         }
     }
 
-    let client = Client::new();
+    let mut cache = SteamCache::load();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
     for game in &mut games {
         check_local_anticheat(game);
         let lower_name = game.name.to_lowercase();
@@ -92,6 +99,20 @@ pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
             continue;
         }
 
+        // Check local cache first
+        if let Some(cached_entry) = cache.get(&game.appid) {
+            game.dlc_list = cached_entry.dlc_list;
+            game.category = if cached_entry.is_free {
+                AppCategory::FreeToPlay
+            } else if game.dlc_list.is_empty() {
+                AppCategory::NoDLC
+            } else {
+                AppCategory::PaidWithDLC
+            };
+            continue;
+        }
+
+        // Fetch from Steam API if not cached
         let url = format!("https://store.steampowered.com/api/appdetails?appids={}", game.appid);
         if let Ok(resp) = client.get(&url).send().await {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
@@ -101,22 +122,47 @@ pub async fn scan_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
                     if let Some(dlcs) = app_data.get("dlc").and_then(|v| v.as_array()) {
                         for dlc in dlcs { if let Some(id) = dlc.as_u64() { dlc_list.push(id as u32); } }
                     }
-                    game.dlc_list = dlc_list;
+                    game.dlc_list = dlc_list.clone();
                     game.category = if is_free { AppCategory::FreeToPlay } else if game.dlc_list.is_empty() { AppCategory::NoDLC } else { AppCategory::PaidWithDLC };
+                    
+                    // Save to cache
+                    cache.insert(game.appid.clone(), is_free, dlc_list);
                 }
             }
         }
     }
+    cache.save();
     games
 }
 
 fn check_local_anticheat(game: &mut SteamGame) {
     if !game.install_dir.exists() { return; }
-    for entry in WalkDir::new(&game.install_dir).max_depth(3).into_iter().flatten() {
+    for entry in WalkDir::new(&game.install_dir).max_depth(6).into_iter().flatten() {
         let name = entry.file_name().to_string_lossy().to_lowercase();
-        if name.contains("easyanticheat") || name.contains("eac") || name.contains("battleye") || name.contains("vanguard") || name.contains("xigncode") {
+        let path_str = entry.path().to_string_lossy().to_lowercase();
+        
+        let ac_detected = if name.contains("easyanticheat") || name.contains("eac") || path_str.contains("easyanticheat") {
+            Some("EasyAntiCheat".to_string())
+        } else if name.contains("battleye") || path_str.contains("battleye") {
+            Some("BattlEye".to_string())
+        } else if name.contains("vanguard") || path_str.contains("vanguard") {
+            Some("Vanguard".to_string())
+        } else if name.contains("ricochet") || path_str.contains("ricochet") {
+            Some("Ricochet".to_string())
+        } else if name.contains("xigncode") || path_str.contains("xigncode") {
+            Some("XIGNCODE3".to_string())
+        } else if name.contains("equ8") || name.contains("nprotect") || name.contains("ace_kernel") || name.contains("mhyprot") {
+            Some("Anti-Cheat".to_string())
+        } else if name.contains("denuvo") && (name.contains("anticheat") || name.contains("ac")) {
+            Some("Denuvo Anti-Cheat".to_string())
+        } else {
+            None
+        };
+
+        if let Some(ac_name) = ac_detected {
             game.has_anticheat = true;
-            game.anticheat_name = Some("Anti-Cheat".to_string());
+            game.is_online_multiplayer = true;
+            game.anticheat_name = Some(ac_name);
             break;
         }
     }

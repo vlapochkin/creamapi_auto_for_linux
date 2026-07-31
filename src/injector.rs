@@ -131,6 +131,27 @@ impl Injector {
         Ok(())
     }
 
+    pub fn save_custom_config(&self, game: &SteamGame, dlcs_csv: &str) -> Result<()> {
+        let dlc_ids: Vec<u32> = dlcs_csv
+            .split(',')
+            .filter_map(|s| s.trim().parse::<u32>().ok())
+            .collect();
+
+        let json_dlc_array = serde_json::to_string(&dlc_ids).unwrap_or_else(|_| "[]".to_string());
+
+        for target in &game.targets {
+            if let Some(parent_dir) = target.path.parent() {
+                let config_path = parent_dir.join("SmokeAPI.config.json");
+                let content = format!(
+                    "{{\n  \"appid\": {},\n  \"unlock_all\": true,\n  \"logging\": false,\n  \"dlcs\": {}\n}}",
+                    game.appid, json_dlc_array
+                );
+                fs::write(&config_path, content).with_context(|| format!("Failed to write custom config"))?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn get_proton_instructions(&self, game: &SteamGame) -> Option<String> {
         let mut needs_override = false;
         for t in &game.targets {

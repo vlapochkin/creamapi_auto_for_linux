@@ -1,8 +1,10 @@
 mod steam_scanner;
+mod steam_cache;
 mod injector;
 mod ui_main;
 mod updater;
 mod utils;
+
 
 use libadwaita::prelude::*;
 use tokio::runtime::Runtime;
