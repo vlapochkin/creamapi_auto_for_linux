@@ -52,7 +52,7 @@ EOF
 cat > $APP_DIR/AppRun <<EOF
 #!/bin/sh
 SELF=\$(readlink -f "\$0")
-HERE=\$(parent "\$SELF")
+HERE=\$(dirname "\$SELF")
 export PATH="\$HERE/usr/bin:\$PATH"
 export LD_LIBRARY_PATH="\$HERE/usr/lib:\$LD_LIBRARY_PATH"
 export XDG_DATA_DIRS="\$HERE/usr/share:\$XDG_DATA_DIRS"

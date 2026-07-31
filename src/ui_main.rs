@@ -272,7 +272,9 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     if game.is_online_multiplayer { subtitle_info.push("[Online]"); }
 
     let full_subtitle = format!("{} {}", game.install_dir.to_string_lossy(), subtitle_info.join(" "));
-    let row = ExpanderRow::builder().title(game.name.clone()).subtitle(full_subtitle).build();
+    let escaped_title = glib::markup_escape_text(&game.name);
+    let escaped_subtitle = glib::markup_escape_text(&full_subtitle);
+    let row = ExpanderRow::builder().title(escaped_title).subtitle(escaped_subtitle).build();
 
     if let Some(child) = row.first_child() {
         if let Some(box_widget) = child.downcast_ref::<Box>() {
