@@ -303,6 +303,15 @@ fn find_game_icon(appid: &str) -> Option<PathBuf> {
     None
 }
 
+#[test]
+fn test_find_game_icon() {
+    let test_appids = vec!["594650", "383980", "669330", "286160", "252950"];
+    for appid in test_appids {
+        let icon = find_game_icon(appid);
+        println!("AppID: {}, Icon: {:?}", appid, icon);
+    }
+}
+
 fn parse_acf(acf_path: &Path) -> Result<SteamGame> {
     let content = fs::read_to_string(acf_path)?;
     let re_appid = Regex::new(r#""appid"\s+"([^"]+)""#).unwrap();

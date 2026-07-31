@@ -368,9 +368,21 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
     }
 
     let prefix_box = Box::new(Orientation::Horizontal, 12);
-    let icon_img = Image::builder().pixel_size(48).build();
-    if let Some(path) = &game.icon_path { icon_img.set_from_file(Some(path)); }
-    else { icon_img.set_icon_name(Some("input-gaming-symbolic")); }
+    let icon_img = Image::builder().width_request(40).height_request(40).build();
+    let mut icon_loaded = false;
+    if let Some(path) = &game.icon_path {
+        if let Ok(texture) = gdk::Texture::from_filename(path) {
+            icon_img.set_paintable(Some(&texture));
+            icon_loaded = true;
+        } else {
+            icon_img.set_from_file(Some(path));
+            icon_loaded = true;
+        }
+    }
+    if !icon_loaded {
+        icon_img.set_pixel_size(40);
+        icon_img.set_icon_name(Some("input-gaming-symbolic"));
+    }
     prefix_box.append(&icon_img);
 
     let folder_btn = Button::builder().icon_name("folder-open-symbolic").css_classes(vec!["flat".to_string()]).tooltip_text(trans.open_folder).focusable(true).build();
