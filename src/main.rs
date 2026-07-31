@@ -1,5 +1,6 @@
 mod steam_scanner;
 mod steam_cache;
+mod steam_api;
 mod injector;
 mod ui_main;
 mod updater;

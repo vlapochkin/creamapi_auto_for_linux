@@ -259,10 +259,18 @@ fn parse_acf(acf_path: &Path) -> Result<SteamGame> {
         Path::new(&home).join(".steam/root/appcache/librarycache"),
         Path::new(&home).join(".steam/steam/appcache/librarycache"),
         Path::new(&home).join(".local/share/Steam/appcache/librarycache"),
+        Path::new(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache"),
     ];
     for p in cache_paths {
-        let jpg = p.join(format!("{}_icon.jpg", appid));
-        if jpg.exists() { icon_path = Some(jpg); break; }
+        let candidates = vec![
+            p.join(format!("{}_icon.jpg", appid)),
+            p.join(format!("{}_header.jpg", appid)),
+            p.join(format!("{}_logo.png", appid)),
+        ];
+        for candidate in candidates {
+            if candidate.exists() { icon_path = Some(candidate); break; }
+        }
+        if icon_path.is_some() { break; }
     }
 
     if install_dir.exists() {

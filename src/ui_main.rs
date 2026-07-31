@@ -409,11 +409,61 @@ fn create_game_row(game: SteamGame, injector: Arc<Injector>, toast_overlay: Toas
         let dialog = MessageDialog::builder()
             .transient_for(&window_edit)
             .heading("Редактировать списки DLC / Конфиг")
-            .body("Введите ID DLC через запятую:")
+            .body("Введите ID DLC через запятую или загрузите автоматически из Steam:")
             .build();
         
-        let entry = Entry::builder().text(&dlc_text).margin_top(12).margin_start(24).margin_end(24).build();
-        dialog.set_extra_child(Some(&entry));
+        let container = Box::new(Orientation::Vertical, 12);
+        container.set_margin_top(12);
+        container.set_margin_start(24);
+        container.set_margin_end(24);
+
+        let entry = Entry::builder().text(&dlc_text).focusable(true).build();
+        let fetch_btn = Button::builder()
+            .label("🌐 Загрузить список DLC из Steam")
+            .css_classes(vec!["suggested-action".to_string()])
+            .focusable(true)
+            .build();
+
+        let entry_clone = entry.clone();
+        let appid_clone = game_edit.appid.clone();
+        let ov_fetch = overlay_edit.clone();
+        let l_fetch = lang_edit.clone();
+
+        fetch_btn.connect_clicked(move |btn| {
+            let entry_inner = entry_clone.clone();
+            let appid_inner = appid_clone.clone();
+            let ov_inner = ov_fetch.clone();
+            let l_inner = l_fetch.clone();
+            let btn_inner = btn.clone();
+
+            btn.set_sensitive(false);
+            btn.set_label("Загрузка DLC из Steam...");
+
+            glib::spawn_future_local(async move {
+                let fetcher = crate::steam_api::SteamApiFetcher::new();
+                match fetcher.fetch_dlcs_for_app(&appid_inner).await {
+                    Ok(dlcs) if !dlcs.is_empty() => {
+                        let ids_str = dlcs.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>().join(", ");
+                        entry_inner.set_text(&ids_str);
+                        let is_ru = *l_inner.lock().unwrap() == Language::RU;
+                        let msg = if is_ru { format!("Успешно загружено DLC: {}", dlcs.len()) } else { format!("Fetched {} DLCs!", dlcs.len()) };
+                        ov_inner.add_toast(Toast::new(&msg));
+                    }
+                    _ => {
+                        let is_ru = *l_inner.lock().unwrap() == Language::RU;
+                        let msg = if is_ru { "DLC не найдены или ошибка Steam API" } else { "No DLCs found or Steam API error" };
+                        ov_inner.add_toast(Toast::new(&msg));
+                    }
+                }
+                btn_inner.set_label("🌐 Загрузить список DLC из Steam");
+                btn_inner.set_sensitive(true);
+            });
+        });
+
+        container.append(&entry);
+        container.append(&fetch_btn);
+        dialog.set_extra_child(Some(&container));
+        
         dialog.add_response("cancel", "Отмена");
         dialog.add_response("save", "Сохранить");
         dialog.set_response_appearance("save", ResponseAppearance::Suggested);
