@@ -31,7 +31,7 @@ impl Injector {
                 "steam_api.dll" => ("steam_api_o.dll", "smoke_api32.dll"),
                 "libsteam_api.so" => {
                     let res = if target.is_64bit { "libsmoke_api64.so" } else { "libsmoke_api32.so" };
-                    ("libsteam_api.so.orig", res)
+                    ("libsteam_api_o.so", res)
                 }
                 _ => anyhow::bail!("Unknown target file: {}", filename),
             };
@@ -111,7 +111,7 @@ impl Injector {
             let backup_name = match filename.as_ref() {
                 "steam_api64.dll" => "steam_api64_o.dll",
                 "steam_api.dll" => "steam_api_o.dll",
-                "libsteam_api.so" => "libsteam_api.so.orig",
+                "libsteam_api.so" => "libsteam_api_o.so",
                 _ => continue,
             };
 
